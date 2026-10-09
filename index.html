@@ -7,7 +7,7 @@
 <meta name="color-scheme" content="light only">
 <meta name="supported-color-schemes" content="light">
 <link rel="icon" type="image/png" href="Chibi.png">
-<title> Tritiana Birthday Invitation</title>
+<title>Tritiana Birthday Invitation</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Quicksand:wght@400;500;600;700&family=Caveat:wght@600;700&display=swap" rel="stylesheet">
 <style>
@@ -132,7 +132,7 @@
   }
   .bunny-cover{
     position:absolute; inset:0;
-    width:100%; height:105%;
+    width:100%; height:100%;
     object-fit:cover; object-position:50% 50%;
     display:block; animation:none;
   }
@@ -303,6 +303,12 @@
   .submit-btn:hover{ transform: translateY(-2px); }
   .rsvp-msg{ margin-top:16px; text-align:center; font-size:.88rem; font-weight:700; color:var(--blue-deep); display:none;
     background:var(--sky); border-radius:14px; padding:12px; }
+
+  /* Form terkunci setelah diisi */
+  .submit-btn:disabled, .wish-form button:disabled{ opacity:.6; cursor:not-allowed; }
+  .submit-btn:disabled:hover{ transform:none; }
+  .field input:disabled, .field select:disabled, .wish-fields input:disabled,
+  .choice-group button:disabled{ opacity:.65; cursor:not-allowed; }
 
   /* Wishes */
   .wish-fields{ display:flex; flex-direction:column; gap:10px; margin-top:8px; }
@@ -722,8 +728,38 @@
     });
   });
 
+  // ---------- Nama yang sudah RSVP dari perangkat ini (cadangan kalau pengecekan sheet telat/gagal) ----------
+  const normName = str => str.toLowerCase().replace(/\s+/g, ' ').trim();
+  function getSentNames(){
+    try{ return JSON.parse(localStorage.getItem('tritiana_rsvp_names') || '[]'); }catch(e){ return []; }
+  }
+  function addSentName(name){
+    try{
+      const list = getSentNames();
+      list.push(normName(name));
+      localStorage.setItem('tritiana_rsvp_names', JSON.stringify(list));
+    }catch(e){}
+  }
+
   // RSVP submit
-  document.getElementById('rsvpSubmit').addEventListener('click', ()=>{
+  // Cek ke Google Sheet: kalau nama sudah pernah RSVP (baris tanpa ucapan), kirim ditolak
+  async function rsvpAlreadyRegistered(name){
+    if(!CONFIG.sheetUrl) return false;
+    try{
+      const url = CONFIG.sheetUrl + (CONFIG.sheetUrl.includes('?') ? '&' : '?') + 't=' + Date.now();
+      const res = await fetch(url);
+      const rows = await res.json();
+      const target = normName(name);
+      return Array.isArray(rows) && rows.some(r => r && !r.message && normName(String(r.name || '')) === target);
+    }catch(err){
+      console.warn('Could not check existing RSVPs:', err);
+      return false; // kalau gagal cek (mis. sinyal jelek), tamu tetap boleh RSVP
+    }
+  }
+
+  document.getElementById('rsvpSubmit').addEventListener('click', async ()=>{
+    const btn = document.getElementById('rsvpSubmit');
+    if(btn.dataset.busy) return;
     const name = document.getElementById('rsvpName').value.trim();
     const msgEl = document.getElementById('rsvpMsg');
     if(!name){
@@ -732,6 +768,24 @@
       msgEl.textContent = "Don't forget to enter your name 🤍";
       return;
     }
+
+    // Cek duplikat nama dulu
+    btn.dataset.busy = '1';
+    btn.disabled = true;
+    const oldText = btn.textContent;
+    btn.textContent = 'Checking...';
+    const exists = getSentNames().includes(normName(name)) || await rsvpAlreadyRegistered(name);
+    btn.disabled = false;
+    btn.textContent = oldText;
+    delete btn.dataset.busy;
+
+    if(exists){
+      msgEl.style.display='block';
+      msgEl.style.color = '#c0526b';
+      msgEl.textContent = `"${name}" has already RSVP'd 🤍 If you're a different person with the same name, please add your last name.`;
+      return;
+    }
+
     const attend = document.querySelector('.attend-btn.active').dataset.val;
     const guests = document.getElementById('rsvpGuests').value;
     msgEl.style.display='block';
@@ -746,6 +800,10 @@
       guests: attend === 'yes' ? guests : '',
       message: ''
     });
+
+    // Form tetap terbuka: tamu lain / nama lain boleh RSVP lagi, nama yang sama ditolak
+    addSentName(name);
+    document.getElementById('rsvpName').value = '';
   });
 
   // Wishes — pulled from and sent to the shared Google Sheet so every visitor sees the same wall
@@ -802,6 +860,7 @@
       guests: '',
       message: val
     });
+
   }
 
   // Scroll reveal
